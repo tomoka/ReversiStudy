@@ -1,0 +1,16 @@
+# Gradle / Android Studio
+*.iml
+.gradle/
+.idea/
+build/
+local.properties
+.cxx/
+captures/
+.externalNativeBuild/
+
+# 署名鍵
+*.jks
+*.keystore
+
+# OS
+.DS_Store

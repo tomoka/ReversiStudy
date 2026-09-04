@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">リバーシ</string>
+    <string name="pass">パス</string>
+    <string name="result">結果</string>
+    <string name="black_count">黒　%1$d　個</string>
+    <string name="white_count">白　%1$d　個</string>
+
+</resources>
