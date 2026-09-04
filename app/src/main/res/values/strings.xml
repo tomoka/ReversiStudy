@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">Reversi</string>
+    <string name="pass">Pass</string>
+    <string name="result">Result</string>
+    <string name="black_count">Black %1$d</string>
+    <string name="white_count">White %1$d</string>
+
+</resources>

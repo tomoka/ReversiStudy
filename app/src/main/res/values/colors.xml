@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <color name="game_background">#FF1B5E20</color>
+    <color name="game_text">#C8FFFFFF</color>
+
+</resources>
