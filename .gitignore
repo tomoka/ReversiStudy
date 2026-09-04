@@ -3,6 +3,7 @@
 .gradle/
 .idea/
 build/
+.kotlin/
 local.properties
 .cxx/
 captures/
