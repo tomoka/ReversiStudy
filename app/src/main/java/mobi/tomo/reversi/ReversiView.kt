@@ -3,8 +3,11 @@ package mobi.tomo.reversi
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.RadialGradient
 import android.graphics.RectF
+import android.graphics.Shader
 import android.os.Bundle
 import android.os.Parcelable
 import android.provider.Settings
@@ -20,6 +23,7 @@ import mobi.tomo.reversi.game.Disc
 import mobi.tomo.reversi.game.Game
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.max
 import kotlin.math.min
 
@@ -72,10 +76,31 @@ class ReversiView(context: Context) : View(context) {
         )
     }.getOrDefault(1f).coerceIn(0f, 4f)
 
+    /** 石の半径。onSizeChanged で決まる。 */
+    private var stoneRadius = 0f
+
     private val boardPaint = fillPaint(R.color.board_green)
-    private val blackPaint = fillPaint(R.color.disc_black)
-    private val whitePaint = fillPaint(R.color.disc_white)
     private val hintPaint = fillPaint(R.color.hint)
+
+    /** 石の表面。左上からの光を放射グラデーションで表す。寸法が決まってから作る。 */
+    private val blackFacePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val whiteFacePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** 石の側面（厚み）。真横を向いたときに見える。 */
+    private val blackSidePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val whiteSidePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** 盤に落ちる影。 */
+    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** 盤の四隅を少し暗くして、盤面に奥行きを出す。 */
+    private val vignettePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** 格子の溝の下側に入れる明るい線。彫り込んで見せるため。 */
+    private val bevelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = ContextCompat.getColor(context, R.color.board_bevel)
+        style = Paint.Style.STROKE
+    }
     private val scrimPaint = fillPaint(R.color.scrim)
     private val overlayPaint = fillPaint(R.color.overlay)
     private val buttonPaint = fillPaint(R.color.button_fill)
@@ -144,8 +169,12 @@ class ReversiView(context: Context) : View(context) {
         scoreBaseline = boardTop - header * 0.14f
         footerBaseline = boardTop + boardSide + footer * 0.7f
 
+        stoneRadius = cell * 0.4f
+        buildStoneShaders()
+
         linePaint.strokeWidth = max(dp(1f), cell * 0.02f)
         discEdgePaint.strokeWidth = max(dp(0.5f), cell * 0.02f)
+        bevelPaint.strokeWidth = max(dp(1f), cell * 0.015f)
 
         // 文字は sp を基本にしつつ、盤より大きくならないよう頭打ちにする。
         titlePaint.textSize = min(sp(30f), boardSide * 0.11f)
@@ -174,6 +203,77 @@ class ReversiView(context: Context) : View(context) {
             boardTop + (boardSide + passHeight) / 2f,
         )
     }
+
+    /**
+     * 石と盤の陰影を作る。原点を石の中心とした座標で作っておき、
+     * 描くときに Canvas を平行移動して使い回す。
+     */
+    private fun buildStoneShaders() {
+        if (stoneRadius <= 0f) return
+        val r = stoneRadius
+        // 光源は左上。ハイライトをその方向へ寄せる
+        val lightX = -r * 0.38f
+        val lightY = -r * 0.38f
+
+        blackFacePaint.shader = RadialGradient(
+            lightX, lightY, r * 1.7f,
+            intArrayOf(
+                ContextCompat.getColor(context, R.color.disc_black_lit),
+                ContextCompat.getColor(context, R.color.disc_black),
+                ContextCompat.getColor(context, R.color.disc_black_shade),
+            ),
+            floatArrayOf(0f, 0.45f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        whiteFacePaint.shader = RadialGradient(
+            lightX, lightY, r * 1.7f,
+            intArrayOf(
+                ContextCompat.getColor(context, R.color.disc_white_lit),
+                ContextCompat.getColor(context, R.color.disc_white),
+                ContextCompat.getColor(context, R.color.disc_white_shade),
+            ),
+            floatArrayOf(0f, 0.5f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        // 側面は円筒なので、上が明るく下が暗い縦のグラデーション
+        blackSidePaint.shader = LinearGradient(
+            0f, -r, 0f, r,
+            ContextCompat.getColor(context, R.color.disc_black_side),
+            ContextCompat.getColor(context, R.color.disc_black_shade),
+            Shader.TileMode.CLAMP,
+        )
+        whiteSidePaint.shader = LinearGradient(
+            0f, -r, 0f, r,
+            ContextCompat.getColor(context, R.color.disc_white_side),
+            ContextCompat.getColor(context, R.color.disc_white_shade),
+            Shader.TileMode.CLAMP,
+        )
+        // 接地影は中心が濃く外へ向かって消える
+        shadowPaint.shader = RadialGradient(
+            0f, 0f, r * 1.15f,
+            intArrayOf(
+                ContextCompat.getColor(context, R.color.stone_shadow),
+                ContextCompat.getColor(context, R.color.stone_shadow),
+                ContextCompat.getColor(context, R.color.transparent),
+            ),
+            floatArrayOf(0f, 0.55f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        vignettePaint.shader = RadialGradient(
+            boardLeft + boardSide / 2f, boardTop + boardSide / 2f, boardSide * 0.72f,
+            intArrayOf(
+                ContextCompat.getColor(context, R.color.transparent),
+                ContextCompat.getColor(context, R.color.transparent),
+                ContextCompat.getColor(context, R.color.board_vignette),
+            ),
+            floatArrayOf(0f, 0.6f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+    }
+
+    private fun facePaint(disc: Disc) = if (disc == Disc.BLACK) blackFacePaint else whiteFacePaint
+
+    private fun sidePaint(disc: Disc) = if (disc == Disc.BLACK) blackSidePaint else whiteSidePaint
 
     override fun onDraw(canvas: Canvas) {
         if (boardSide <= 0f) return
@@ -360,12 +460,17 @@ class ReversiView(context: Context) : View(context) {
 
     private fun drawBoard(canvas: Canvas) {
         canvas.drawRect(boardLeft, boardTop, boardLeft + boardSide, boardTop + boardSide, boardPaint)
+        // 溝の線と、その右下に入れる明るい線。2 本 1 組で彫り込んだように見せる
+        val bevel = max(1f, cell * 0.015f)
         for (i in 0..Board.SIZE) {
             val x = boardLeft + cell * i
             canvas.drawLine(x, boardTop, x, boardTop + boardSide, linePaint)
+            canvas.drawLine(x + bevel, boardTop, x + bevel, boardTop + boardSide, bevelPaint)
             val y = boardTop + cell * i
             canvas.drawLine(boardLeft, y, boardLeft + boardSide, y, linePaint)
+            canvas.drawLine(boardLeft, y + bevel, boardLeft + boardSide, y + bevel, bevelPaint)
         }
+        canvas.drawRect(boardLeft, boardTop, boardLeft + boardSide, boardTop + boardSide, vignettePaint)
         for (col in intArrayOf(2, 6)) {
             for (row in intArrayOf(2, 6)) {
                 canvas.drawCircle(
@@ -380,6 +485,7 @@ class ReversiView(context: Context) : View(context) {
 
     private fun drawStones(canvas: Canvas, game: Game) {
         val radius = cell * 0.4f
+        val thickness = radius * THICKNESS_RATIO
         val now = AnimationUtils.currentAnimationTimeMillis()
         val flipMillis = FLIP_MILLIS * animationScale
         val placeMillis = PLACE_MILLIS * animationScale
@@ -391,29 +497,80 @@ class ReversiView(context: Context) : View(context) {
             val delay = flipDelay[index]
 
             when {
-                // 裏返り中：横幅を縮めて 0 を通り、半分を過ぎたら色が変わる
+                // 裏返り中：横幅を縮めて 0 を通り、半分を過ぎたら色が変わる。
+                // 真横を向いたところで厚みが見え、少し浮き上がる
                 delay != NO_DELAY && animationEnd > 0L -> {
                     val progress = progress(now - animationStart - delay, flipMillis)
+                    val angle = Math.PI * progress
                     val shown = if (progress < 0.5f) disc.opposite else disc
-                    val halfWidth = max(radius * abs(cos(Math.PI * progress)).toFloat(), radius * 0.03f)
-                    drawStone(canvas, x, y, halfWidth, radius, shown)
+                    val halfWidth = radius * abs(cos(angle)).toFloat()
+                    val sideHalfWidth = halfWidth + thickness * abs(sin(angle)).toFloat()
+                    val lift = radius * LIFT_RATIO * abs(sin(angle)).toFloat()
+                    drawStone(canvas, x, y, halfWidth, radius, sideHalfWidth, lift, shown)
                 }
                 // 置いた石：小さく現れる
                 index == placedIndex && animationEnd > 0L -> {
                     val progress = progress(now - animationStart, placeMillis)
                     val eased = progress * progress * (3f - 2f * progress)
                     val size = radius * (0.3f + 0.7f * eased)
-                    drawStone(canvas, x, y, size, size, disc)
+                    drawStone(canvas, x, y, size, size, size, 0f, disc)
                 }
-                else -> drawStone(canvas, x, y, radius, radius, disc)
+                else -> drawStone(canvas, x, y, radius, radius, radius, 0f, disc)
             }
         }
     }
 
-    private fun drawStone(canvas: Canvas, x: Float, y: Float, halfWidth: Float, halfHeight: Float, disc: Disc) {
-        val paint = if (disc == Disc.BLACK) blackPaint else whitePaint
-        canvas.drawOval(x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight, paint)
-        canvas.drawOval(x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight, discEdgePaint)
+    /**
+     * 石を 1 枚描く。
+     *
+     * @param halfWidth 表面の横半径。裏返る途中は 0 に近づく
+     * @param sideHalfWidth 厚みまで含めた見かけの横半径。真横を向くと厚みだけが残る
+     * @param lift 盤から浮かせる量。転がっているように見せる
+     */
+    private fun drawStone(
+        canvas: Canvas,
+        x: Float,
+        y: Float,
+        halfWidth: Float,
+        halfHeight: Float,
+        sideHalfWidth: Float,
+        lift: Float,
+        disc: Disc,
+    ) {
+        canvas.save()
+        canvas.translate(x, y)
+
+        // 接地影。石が細くなれば影も細く、浮けば薄くなる
+        canvas.save()
+        canvas.translate(stoneRadius * 0.10f, stoneRadius * 0.14f)
+        canvas.scale(max(0.12f, sideHalfWidth / stoneRadius), 1f)
+        shadowPaint.alpha = (255 * (1f - 0.45f * (lift / stoneRadius).coerceIn(0f, 1f))).toInt()
+        canvas.drawCircle(0f, 0f, stoneRadius * 1.05f, shadowPaint)
+        canvas.restore()
+        shadowPaint.alpha = 255
+
+        canvas.translate(0f, -lift)
+
+        // 厚み（側面）。表面より広いときだけ見える
+        if (sideHalfWidth > halfWidth + 0.5f) {
+            val corner = min(sideHalfWidth, halfHeight)
+            canvas.drawRoundRect(
+                -sideHalfWidth, -halfHeight, sideHalfWidth, halfHeight,
+                corner, corner, sidePaint(disc),
+            )
+        }
+
+        // 表面。Canvas ごと横に縮めることで、ハイライトも一緒に潰れる
+        if (halfWidth > 0.5f) {
+            canvas.save()
+            canvas.scale(halfWidth / halfHeight, 1f)
+            canvas.drawCircle(0f, 0f, halfHeight, facePaint(disc))
+            if (halfWidth > halfHeight * 0.25f) {
+                canvas.drawCircle(0f, 0f, halfHeight, discEdgePaint)
+            }
+            canvas.restore()
+        }
+        canvas.restore()
     }
 
     /** 経過時間を 0..1 に。まだ始まっていなければ 0、終わっていれば 1。 */
@@ -469,12 +626,13 @@ class ReversiView(context: Context) : View(context) {
         canvas.drawRoundRect(rect, corner, corner, buttonStrokePaint)
 
         val discX = rect.left + rect.height() * 0.5f
-        canvas.drawCircle(
-            discX,
-            rect.centerY(),
-            rect.height() * 0.28f,
-            if (disc == Disc.BLACK) blackPaint else whitePaint,
-        )
+        val discRadius = rect.height() * 0.28f
+        canvas.save()
+        canvas.translate(discX, rect.centerY())
+        canvas.scale(discRadius / stoneRadius, discRadius / stoneRadius)
+        canvas.drawCircle(0f, 0f, stoneRadius, facePaint(disc))
+        canvas.drawCircle(0f, 0f, stoneRadius, discEdgePaint)
+        canvas.restore()
         canvas.drawText(
             label,
             (discX + rect.right) / 2f,
@@ -581,6 +739,12 @@ class ReversiView(context: Context) : View(context) {
 
         /** 置いた石が現れるまでの時間。 */
         const val PLACE_MILLIS = 160f
+
+        /** 石の厚み。半径に対する割合。 */
+        const val THICKNESS_RATIO = 0.26f
+
+        /** 裏返る途中で盤から浮かせる量。半径に対する割合。 */
+        const val LIFT_RATIO = 0.16f
 
         /** CPU が考えているように見せる待ち時間。探索自体は数十ミリ秒で終わる。 */
         const val THINKING_MILLIS = 600L
