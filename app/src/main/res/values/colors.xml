@@ -1,7 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <color name="game_background">#FF1B5E20</color>
-    <color name="game_text">#C8FFFFFF</color>
+    <color name="game_background">#FF102A17</color>
+    <color name="board_green">#FF1B7A3D</color>
+    <color name="board_line">#66000000</color>
+    <color name="disc_black">#FF111111</color>
+    <color name="disc_white">#FFF5F5F5</color>
+    <color name="hint">#99FFEB3B</color>
+    <color name="scrim">#B3000000</color>
+    <color name="overlay">#E6102A17</color>
+    <color name="button_fill">#FF1F3D2B</color>
+    <color name="button_stroke">#FFB0BEC5</color>
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#B3FFFFFF</color>
+
+    <color name="ic_launcher_background">#FF1B5E20</color>
 
 </resources>
