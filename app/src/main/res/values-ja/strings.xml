@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">リバーシ</string>
+
+    <string name="choose_side">先手・後手を選んでください</string>
+    <string name="choose_black">黒（先手）</string>
+    <string name="choose_white">白（後手）</string>
+
+    <string name="turn_black">黒の番</string>
+    <string name="turn_white">白の番</string>
+    <string name="score">● %1$d   ○ %2$d</string>
+    <string name="thinking">考え中…</string>
+    <string name="your_side_black">あなたは黒</string>
+    <string name="your_side_white">あなたは白</string>
+
+    <string name="pass">パス</string>
+
+    <string name="result">結果</string>
+    <string name="black_count">黒　%1$d　個</string>
+    <string name="white_count">白　%1$d　個</string>
+    <string name="winner_black">黒の勝ち</string>
+    <string name="winner_white">白の勝ち</string>
+    <string name="draw">引き分け</string>
+    <string name="tap_to_restart">タップしてタイトルへ</string>
+
+</resources>

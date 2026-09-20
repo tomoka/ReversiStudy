@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- 画面回転時に View の状態を保存・復元するには id が要る。 -->
+    <item name="reversi_view" type="id" />
+
+</resources>
