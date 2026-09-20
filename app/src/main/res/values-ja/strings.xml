@@ -10,6 +10,8 @@
     <string name="turn_black">黒の番</string>
     <string name="turn_white">白の番</string>
     <string name="score">● %1$d   ○ %2$d</string>
+    <string name="your_side_black">あなたは黒</string>
+    <string name="your_side_white">あなたは白</string>
 
     <string name="pass">パス</string>
 
