@@ -95,3 +95,23 @@ mobi.tomo.reversi
 ```
 
 `Board` と `Game` のユニットテストが `app/src/test` にある。
+
+## 謝辞
+
+最初の実装（2013年）は、下記の記事とコードで勉強させていただきました。
+
+- M.I.のプログラミング・メモ「Androidでオセロゲームを作ってみる」
+  https://blog.makotoishida.com/2011/06/android-1.html
+- mikehibm/MiReversi — MIT License, Copyright (c) 2011 Makoto Ishida
+  https://github.com/mikehibm/MiReversi
+
+実装そのものは自分で書いたもので、コードの流用はしていません。
+
+2026年の作り直し（Gradle 化、Kotlin 移植、CPU 対戦、アニメーション、
+立体表現）は、クロちゃん（Claude）と一緒に進めました。
+
+## ライセンス
+
+MIT License. 詳細は [LICENSE](LICENSE) を参照。
+
+`Copyright (c) 2026 tomotake`
