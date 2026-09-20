@@ -1,6 +1,7 @@
 # ReversiStudy
 
-Android 向けのリバーシ。2013 年に Eclipse ADT で作ったものを、Gradle + Kotlin に移行中。
+Android 向けのリバーシ。2013 年に Eclipse ADT で作ったものを、Gradle + Kotlin に作り直した。
+CPU 対戦ができる。
 
 ## ビルド
 
@@ -21,7 +22,7 @@ Android Studio で開くか、コマンドラインから:
 | 2 | 盤面描画とタッチ判定を画面サイズ基準に直す、各画面の描画、エッジツーエッジ対応 | 完了 |
 | 3 | ロジックと View の分離、盤面モデルのユニットテスト | 完了 |
 | 4 | CPU 対戦（αβ探索・終盤読み切り） | 完了 |
-| 5 | 画面回転・状態保存への対応 | 未着手 |
+| 5 | 画面回転・状態保存への対応 | 完了 |
 
 ## 構成
 
@@ -50,6 +51,16 @@ mobi.tomo.reversi
 - 強さは `ComputerPlayer` の `depth` と `endgameEmpties` で決まる。既定は
   `MEDIUM_DEPTH = 4` で「中くらい」。難易度を選べるようにする場合は、
   この 2 つを切り替えれば足りる。
+
+## 画面回転
+
+- 向きの固定を外したので、縦横どちらでも遊べる。盤は使える領域の短い方に合わせて
+  正方形に収まる。
+- 回転すると Activity は作り直されるため、`ReversiView.onSaveInstanceState` で
+  盤面・手番・選んだ色を保存して復元する。盤面は `Board.toDiagram()` の文字列として
+  持たせている。
+- 復元後は `scheduleNext()` を呼び直すので、CPU の手番やパスの途中で回転しても
+  続きが動く。
 
 ## テスト
 

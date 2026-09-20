@@ -122,6 +122,34 @@ class GameTest {
     }
 
     @Test
+    fun `盤面図と手番から同じ局面を復元できる`() {
+        // 画面回転時は盤面を図の文字列として保存し、手番とあわせて作り直す
+        val random = Random(20260920)
+        val original = Game()
+        repeat(20) {
+            when (original.state) {
+                Game.State.IN_PROGRESS ->
+                    original.play(original.legalMoves[random.nextInt(original.legalMoves.size)])
+                Game.State.PASS -> original.acknowledgePass()
+                Game.State.FINISHED -> Unit
+            }
+        }
+
+        val diagram = original.board.toDiagram()
+        val restored = Game(
+            first = original.turn,
+            board = Board.fromDiagram(*diagram.split("\n").toTypedArray()),
+        )
+
+        assertEquals(original.board.toDiagram(), restored.board.toDiagram())
+        assertEquals(original.turn, restored.turn)
+        assertEquals(original.state, restored.state)
+        assertEquals(original.legalMoves, restored.legalMoves)
+        assertEquals(original.count(Disc.BLACK), restored.count(Disc.BLACK))
+        assertEquals(original.count(Disc.WHITE), restored.count(Disc.WHITE))
+    }
+
+    @Test
     fun `ランダムな対局が必ず終局し、石数の合計が盤上と一致する`() {
         val random = Random(20260920)
         repeat(300) {
