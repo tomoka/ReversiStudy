@@ -5,10 +5,13 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.os.Bundle
+import android.os.Parcelable
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import androidx.core.content.ContextCompat
+import androidx.core.os.BundleCompat
 import mobi.tomo.reversi.game.Board
 import mobi.tomo.reversi.game.ComputerPlayer
 import mobi.tomo.reversi.game.Disc
@@ -24,6 +27,8 @@ import kotlin.math.min
  * 「CPU の手番になったら考えさせる」ことだけを行う。
  *
  * マスの大きさは View の実寸から算出するため、画面の密度やサイズに依存しない。
+ * 画面が回転して Activity が作り直されても、[onSaveInstanceState] で局面を保存し
+ * 復元する。
  */
 class ReversiView(context: Context) : View(context) {
 
@@ -80,6 +85,11 @@ class ReversiView(context: Context) : View(context) {
         game?.acknowledgePass()
         scheduleNext()
         invalidate()
+    }
+
+    init {
+        // 状態の保存・復元は id のある View だけが対象になる
+        id = R.id.reversi_view
     }
 
     /** CPU に一手指させる。少し待ってから動かすことで、直前の着手が見えるようにする。 */
@@ -204,6 +214,45 @@ class ReversiView(context: Context) : View(context) {
         cancelPending()
         super.onDetachedFromWindow()
     }
+
+    override fun onSaveInstanceState(): Parcelable {
+        val state = Bundle()
+        state.putParcelable(KEY_SUPER, super.onSaveInstanceState())
+        state.putString(KEY_PLAYER_DISC, playerDisc.name)
+        game?.let {
+            state.putString(KEY_BOARD, it.board.toDiagram())
+            state.putString(KEY_TURN, it.turn.name)
+        }
+        return state
+    }
+
+    override fun onRestoreInstanceState(state: Parcelable?) {
+        if (state !is Bundle) {
+            super.onRestoreInstanceState(state)
+            return
+        }
+
+        playerDisc = discOf(state.getString(KEY_PLAYER_DISC), Disc.BLACK)
+        val diagram = state.getString(KEY_BOARD)
+        val turn = state.getString(KEY_TURN)
+        game = if (diagram != null && turn != null) {
+            Game(
+                first = discOf(turn, Disc.BLACK),
+                board = Board.fromDiagram(*diagram.split("\n").toTypedArray()),
+            )
+        } else {
+            null
+        }
+
+        super.onRestoreInstanceState(
+            BundleCompat.getParcelable(state, KEY_SUPER, Parcelable::class.java),
+        )
+        // 復元した局面が CPU の手番やパスなら、その続きを予約し直す
+        scheduleNext()
+    }
+
+    private fun discOf(name: String?, fallback: Disc): Disc =
+        Disc.entries.firstOrNull { it.name == name } ?: fallback
 
     private fun startGame(disc: Disc) {
         playerDisc = disc
@@ -422,5 +471,10 @@ class ReversiView(context: Context) : View(context) {
 
         /** CPU が考えているように見せる待ち時間。探索自体は数十ミリ秒で終わる。 */
         const val THINKING_MILLIS = 600L
+
+        const val KEY_SUPER = "super"
+        const val KEY_BOARD = "board"
+        const val KEY_TURN = "turn"
+        const val KEY_PLAYER_DISC = "playerDisc"
     }
 }
