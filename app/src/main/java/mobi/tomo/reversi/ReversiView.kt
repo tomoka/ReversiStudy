@@ -19,8 +19,11 @@ import androidx.core.content.ContextCompat
 import androidx.core.os.BundleCompat
 import mobi.tomo.reversi.game.Board
 import mobi.tomo.reversi.game.ComputerPlayer
+import mobi.tomo.reversi.game.Difficulty
 import mobi.tomo.reversi.game.Disc
 import mobi.tomo.reversi.game.Game
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -46,7 +49,19 @@ class ReversiView(context: Context) : View(context) {
     /** プレイヤーの色。もう一方を CPU が持つ。 */
     private var playerDisc = Disc.BLACK
 
-    private val computer = ComputerPlayer()
+    /** CPU の強さ。タイトル画面で選ぶ。 */
+    private var difficulty = Difficulty.DEFAULT
+
+    private var computer = ComputerPlayer(difficulty)
+
+    /**
+     * 探索を行うスレッド。強い段階は 1 手に 1 秒以上かかることがあるため、
+     * 画面を止めないよう UI スレッドから外す。
+     */
+    private var searchExecutor: ExecutorService? = null
+
+    /** 探索の世代。局面が変わったら、走っている探索の結果は捨てる。 */
+    private var searchGeneration = 0
 
     /** 盤の一辺（px）。0 のうちはまだ採寸できていない。 */
     private var boardSide = 0f
@@ -59,6 +74,7 @@ class ReversiView(context: Context) : View(context) {
 
     private val blackButton = RectF()
     private val whiteButton = RectF()
+    private val levelButtons = Array(Difficulty.entries.size) { RectF() }
     private val passBox = RectF()
 
     /** 裏返るアニメーションの開始遅延（ms）。[NO_DELAY] はアニメーションしないマス。 */
@@ -104,6 +120,7 @@ class ReversiView(context: Context) : View(context) {
     private val scrimPaint = fillPaint(R.color.scrim)
     private val overlayPaint = fillPaint(R.color.overlay)
     private val buttonPaint = fillPaint(R.color.button_fill)
+    private val buttonSelectedPaint = fillPaint(R.color.button_selected)
     private val starPaint = fillPaint(R.color.board_line)
 
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -137,14 +154,7 @@ class ReversiView(context: Context) : View(context) {
     }
 
     /** CPU に一手指させる。少し待ってから動かすことで、直前の着手が見えるようにする。 */
-    private val computerRunnable = Runnable {
-        val current = game
-        if (current != null && current.state == Game.State.IN_PROGRESS && current.turn != playerDisc) {
-            computer.chooseMove(current.board, current.turn)?.let { playWithAnimation(current, it) }
-        }
-        scheduleNext()
-        invalidate()
-    }
+    private val computerRunnable = Runnable { startComputerSearch() }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -181,8 +191,16 @@ class ReversiView(context: Context) : View(context) {
         bodyPaint.textSize = min(sp(18f), boardSide * 0.075f)
         labelPaint.textSize = min(sp(14f), boardSide * 0.055f)
 
-        val buttonHeight = boardSide * 0.14f
-        val buttonTop = boardTop + boardSide * 0.58f
+        // 強さを選ぶボタンを横一列に並べる
+        val levelTop = boardTop + boardSide * 0.34f
+        val levelHeight = boardSide * 0.11f
+        for (i in levelButtons.indices) {
+            val left = boardLeft + boardSide * (0.06f + i * 0.18f)
+            levelButtons[i].set(left, levelTop, left + boardSide * 0.16f, levelTop + levelHeight)
+        }
+
+        val buttonHeight = boardSide * 0.13f
+        val buttonTop = boardTop + boardSide * 0.70f
         blackButton.set(
             boardLeft + boardSide * 0.06f,
             buttonTop,
@@ -313,6 +331,12 @@ class ReversiView(context: Context) : View(context) {
 
         val current = game
         if (current == null) {
+            val level = levelButtons.indexOfFirst { it.contains(event.x, event.y) }
+            if (level >= 0) {
+                difficulty = Difficulty.entries[level]
+                invalidate()
+                return true
+            }
             when {
                 blackButton.contains(event.x, event.y) -> startGame(Disc.BLACK)
                 whiteButton.contains(event.x, event.y) -> startGame(Disc.WHITE)
@@ -339,6 +363,8 @@ class ReversiView(context: Context) : View(context) {
 
     override fun onDetachedFromWindow() {
         cancelPending()
+        searchExecutor?.shutdownNow()
+        searchExecutor = null
         super.onDetachedFromWindow()
     }
 
@@ -346,6 +372,7 @@ class ReversiView(context: Context) : View(context) {
         val state = Bundle()
         state.putParcelable(KEY_SUPER, super.onSaveInstanceState())
         state.putString(KEY_PLAYER_DISC, playerDisc.name)
+        state.putString(KEY_DIFFICULTY, difficulty.name)
         game?.let {
             state.putString(KEY_BOARD, it.board.toDiagram())
             state.putString(KEY_TURN, it.turn.name)
@@ -360,6 +387,8 @@ class ReversiView(context: Context) : View(context) {
         }
 
         playerDisc = discOf(state.getString(KEY_PLAYER_DISC), Disc.BLACK)
+        difficulty = Difficulty.ofName(state.getString(KEY_DIFFICULTY))
+        computer = ComputerPlayer(difficulty)
         val diagram = state.getString(KEY_BOARD)
         val turn = state.getString(KEY_TURN)
         game = if (diagram != null && turn != null) {
@@ -384,11 +413,43 @@ class ReversiView(context: Context) : View(context) {
 
     private fun startGame(disc: Disc) {
         playerDisc = disc
+        computer = ComputerPlayer(difficulty)
         game = Game()
         resetFlipAnimation()
         scheduleNext()
         invalidate()
     }
+
+    /** 盤面を別スレッドへ渡して探索させ、終わったら UI スレッドへ戻す。 */
+    private fun startComputerSearch() {
+        val current = game ?: return
+        if (current.state != Game.State.IN_PROGRESS || current.turn == playerDisc) return
+
+        val generation = ++searchGeneration
+        val board = current.board
+        val disc = current.turn
+        val engine = computer
+        executor().execute {
+            val move = engine.chooseMove(board, disc)
+            post { applyComputerMove(generation, move) }
+        }
+    }
+
+    private fun applyComputerMove(generation: Int, move: Int?) {
+        // 探索中に対局が変わっていたら、その結果は捨てる
+        if (generation != searchGeneration) return
+        val current = game ?: return
+        if (move != null && current.state == Game.State.IN_PROGRESS && current.turn != playerDisc) {
+            playWithAnimation(current, move)
+        }
+        scheduleNext()
+        invalidate()
+    }
+
+    private fun executor(): ExecutorService =
+        searchExecutor ?: Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "reversi-cpu").apply { isDaemon = true }
+        }.also { searchExecutor = it }
 
     /** 着手し、裏返る石のアニメーションを仕込む。 */
     private fun playWithAnimation(game: Game, index: Int) {
@@ -454,6 +515,8 @@ class ReversiView(context: Context) : View(context) {
     private fun cancelPending() {
         removeCallbacks(passRunnable)
         removeCallbacks(computerRunnable)
+        // 走っている探索の結果を無効にする
+        searchGeneration++
     }
 
     // ------------------------------------------------------------------ 描画
@@ -607,17 +670,55 @@ class ReversiView(context: Context) : View(context) {
         canvas.drawText(
             context.getString(R.string.app_name),
             centerX,
-            boardTop + boardSide * 0.3f,
+            boardTop + boardSide * 0.18f,
             titlePaint,
         )
+
+        canvas.drawText(
+            context.getString(R.string.difficulty_label),
+            centerX,
+            boardTop + boardSide * 0.30f,
+            labelPaint,
+        )
+        Difficulty.entries.forEachIndexed { index, value ->
+            drawLevelButton(canvas, levelButtons[index], value)
+        }
+        canvas.drawText(
+            context.getString(difficultyNameRes(difficulty)),
+            centerX,
+            boardTop + boardSide * 0.555f,
+            bodyPaint,
+        )
+
         canvas.drawText(
             context.getString(R.string.choose_side),
             centerX,
-            boardTop + boardSide * 0.44f,
-            bodyPaint,
+            boardTop + boardSide * 0.655f,
+            labelPaint,
         )
         drawChoiceButton(canvas, blackButton, Disc.BLACK, context.getString(R.string.choose_black))
         drawChoiceButton(canvas, whiteButton, Disc.WHITE, context.getString(R.string.choose_white))
+    }
+
+    private fun drawLevelButton(canvas: Canvas, rect: RectF, value: Difficulty) {
+        val selected = value == difficulty
+        val corner = rect.height() / 4f
+        canvas.drawRoundRect(rect, corner, corner, if (selected) buttonSelectedPaint else buttonPaint)
+        canvas.drawRoundRect(rect, corner, corner, buttonStrokePaint)
+        canvas.drawText(
+            value.level.toString(),
+            rect.centerX(),
+            rect.centerY() + bodyPaint.textSize * 0.36f,
+            if (selected) bodyPaint else labelPaint,
+        )
+    }
+
+    private fun difficultyNameRes(value: Difficulty): Int = when (value) {
+        Difficulty.BEGINNER -> R.string.difficulty_1
+        Difficulty.EASY -> R.string.difficulty_2
+        Difficulty.NORMAL -> R.string.difficulty_3
+        Difficulty.HARD -> R.string.difficulty_4
+        Difficulty.EXPERT -> R.string.difficulty_5
     }
 
     private fun drawChoiceButton(canvas: Canvas, rect: RectF, disc: Disc, label: String) {
@@ -753,5 +854,6 @@ class ReversiView(context: Context) : View(context) {
         const val KEY_BOARD = "board"
         const val KEY_TURN = "turn"
         const val KEY_PLAYER_DISC = "playerDisc"
+        const val KEY_DIFFICULTY = "difficulty"
     }
 }

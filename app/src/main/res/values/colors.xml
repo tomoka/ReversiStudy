@@ -22,6 +22,7 @@
     <color name="scrim">#B3000000</color>
     <color name="overlay">#E6102A17</color>
     <color name="button_fill">#FF1F3D2B</color>
+    <color name="button_selected">#FF2E7D46</color>
     <color name="button_stroke">#FFB0BEC5</color>
     <color name="text_primary">#FFFFFFFF</color>
     <color name="text_secondary">#B3FFFFFF</color>

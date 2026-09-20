@@ -3,6 +3,12 @@
 
     <string name="app_name">リバーシ</string>
 
+    <string name="difficulty_label">強さ</string>
+    <string name="difficulty_1">入門</string>
+    <string name="difficulty_2">初級</string>
+    <string name="difficulty_3">中級</string>
+    <string name="difficulty_4">上級</string>
+    <string name="difficulty_5">達人</string>
     <string name="choose_side">先手・後手を選んでください</string>
     <string name="choose_black">黒（先手）</string>
     <string name="choose_white">白（後手）</string>
