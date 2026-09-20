@@ -10,6 +10,7 @@ import android.view.MotionEvent
 import android.view.View
 import androidx.core.content.ContextCompat
 import mobi.tomo.reversi.game.Board
+import mobi.tomo.reversi.game.ComputerPlayer
 import mobi.tomo.reversi.game.Disc
 import mobi.tomo.reversi.game.Game
 import kotlin.math.max
@@ -18,8 +19,9 @@ import kotlin.math.min
 /**
  * 盤面の描画とタッチ入力を担当する View。
  *
- * ルールと進行は [Game] / [Board] が持ち、この View は「今の局面を描く」ことと
- * 「タップをマスに変換して [Game] に渡す」ことだけを行う。
+ * ルールと進行は [Game] / [Board]、CPU の思考は [ComputerPlayer] が持つ。
+ * この View は「今の局面を描く」「タップをマスに変換して [Game] に渡す」
+ * 「CPU の手番になったら考えさせる」ことだけを行う。
  *
  * マスの大きさは View の実寸から算出するため、画面の密度やサイズに依存しない。
  */
@@ -28,8 +30,10 @@ class ReversiView(context: Context) : View(context) {
     /** 対局中の状態。null はタイトル画面。 */
     private var game: Game? = null
 
-    /** プレイヤーが選んだ色。CPU 対戦を入れるときに使う。 */
+    /** プレイヤーの色。もう一方を CPU が持つ。 */
     private var playerDisc = Disc.BLACK
+
+    private val computer = ComputerPlayer()
 
     /** 盤の一辺（px）。0 のうちはまだ採寸できていない。 */
     private var boardSide = 0f
@@ -74,6 +78,17 @@ class ReversiView(context: Context) : View(context) {
     /** パス表示を一定時間見せてから手番を戻す。 */
     private val passRunnable = Runnable {
         game?.acknowledgePass()
+        scheduleNext()
+        invalidate()
+    }
+
+    /** CPU に一手指させる。少し待ってから動かすことで、直前の着手が見えるようにする。 */
+    private val computerRunnable = Runnable {
+        val current = game
+        if (current != null && current.state == Game.State.IN_PROGRESS && current.turn != playerDisc) {
+            computer.chooseMove(current.board, current.turn)?.let(current::play)
+        }
+        scheduleNext()
         invalidate()
     }
 
@@ -144,7 +159,7 @@ class ReversiView(context: Context) : View(context) {
         drawStones(canvas, current)
         when (current.state) {
             Game.State.IN_PROGRESS -> {
-                drawHints(canvas, current)
+                if (current.turn == playerDisc) drawHints(canvas, current)
                 drawStatus(canvas, current)
             }
             Game.State.PASS -> {
@@ -170,13 +185,12 @@ class ReversiView(context: Context) : View(context) {
 
         when (current.state) {
             Game.State.IN_PROGRESS -> {
+                // CPU の手番中はタップを受け付けない
+                if (current.turn != playerDisc) return true
                 val index = indexAt(event.x, event.y)
                 if (index in current.legalMoves) {
                     current.play(index)
-                    if (current.state == Game.State.PASS) {
-                        removeCallbacks(passRunnable)
-                        postDelayed(passRunnable, PASS_DISPLAY_MILLIS)
-                    }
+                    scheduleNext()
                     invalidate()
                 }
             }
@@ -187,21 +201,38 @@ class ReversiView(context: Context) : View(context) {
     }
 
     override fun onDetachedFromWindow() {
-        removeCallbacks(passRunnable)
+        cancelPending()
         super.onDetachedFromWindow()
     }
 
     private fun startGame(disc: Disc) {
-        removeCallbacks(passRunnable)
         playerDisc = disc
         game = Game()
+        scheduleNext()
         invalidate()
     }
 
     private fun backToTitle() {
-        removeCallbacks(passRunnable)
+        cancelPending()
         game = null
         invalidate()
+    }
+
+    /** 局面が進んだあと、自動で動かすものがあれば予約する。 */
+    private fun scheduleNext() {
+        cancelPending()
+        val current = game ?: return
+        when (current.state) {
+            Game.State.PASS -> postDelayed(passRunnable, PASS_DISPLAY_MILLIS)
+            Game.State.IN_PROGRESS ->
+                if (current.turn != playerDisc) postDelayed(computerRunnable, THINKING_MILLIS)
+            Game.State.FINISHED -> Unit
+        }
+    }
+
+    private fun cancelPending() {
+        removeCallbacks(passRunnable)
+        removeCallbacks(computerRunnable)
     }
 
     // ------------------------------------------------------------------ 描画
@@ -253,9 +284,12 @@ class ReversiView(context: Context) : View(context) {
             scoreBaseline,
             labelPaint,
         )
-        val sideText =
-            if (playerDisc == Disc.BLACK) R.string.your_side_black else R.string.your_side_white
-        canvas.drawText(context.getString(sideText), centerX, footerBaseline, labelPaint)
+        val footerText = when {
+            game.state == Game.State.IN_PROGRESS && game.turn != playerDisc -> R.string.thinking
+            playerDisc == Disc.BLACK -> R.string.your_side_black
+            else -> R.string.your_side_white
+        }
+        canvas.drawText(context.getString(footerText), centerX, footerBaseline, labelPaint)
     }
 
     private fun drawTitle(canvas: Canvas) {
@@ -385,5 +419,8 @@ class ReversiView(context: Context) : View(context) {
     private companion object {
         const val NO_INDEX = -1
         const val PASS_DISPLAY_MILLIS = 1200L
+
+        /** CPU が考えているように見せる待ち時間。探索自体は数十ミリ秒で終わる。 */
+        const val THINKING_MILLIS = 600L
     }
 }
