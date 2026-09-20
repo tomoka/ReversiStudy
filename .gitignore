@@ -9,9 +9,10 @@ local.properties
 captures/
 .externalNativeBuild/
 
-# 署名鍵
+# 署名鍵と、その場所やパスワードを書いた設定
 *.jks
 *.keystore
+keystore.properties
 
 # OS
 .DS_Store
