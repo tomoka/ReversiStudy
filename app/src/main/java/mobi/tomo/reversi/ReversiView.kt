@@ -7,15 +7,19 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Bundle
 import android.os.Parcelable
+import android.provider.Settings
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.AnimationUtils
 import androidx.core.content.ContextCompat
 import androidx.core.os.BundleCompat
 import mobi.tomo.reversi.game.Board
 import mobi.tomo.reversi.game.ComputerPlayer
 import mobi.tomo.reversi.game.Disc
 import mobi.tomo.reversi.game.Game
+import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 
@@ -52,6 +56,21 @@ class ReversiView(context: Context) : View(context) {
     private val blackButton = RectF()
     private val whiteButton = RectF()
     private val passBox = RectF()
+
+    /** 裏返るアニメーションの開始遅延（ms）。[NO_DELAY] はアニメーションしないマス。 */
+    private val flipDelay = IntArray(100) { NO_DELAY }
+    private var placedIndex = NO_INDEX
+    private var animationStart = 0L
+    private var animationEnd = 0L
+
+    /** 端末の「アニメーションを無効」設定を尊重する。0 ならアニメーションしない。 */
+    private val animationScale: Float = runCatching {
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        )
+    }.getOrDefault(1f).coerceIn(0f, 4f)
 
     private val boardPaint = fillPaint(R.color.board_green)
     private val blackPaint = fillPaint(R.color.disc_black)
@@ -96,7 +115,7 @@ class ReversiView(context: Context) : View(context) {
     private val computerRunnable = Runnable {
         val current = game
         if (current != null && current.state == Game.State.IN_PROGRESS && current.turn != playerDisc) {
-            computer.chooseMove(current.board, current.turn)?.let(current::play)
+            computer.chooseMove(current.board, current.turn)?.let { playWithAnimation(current, it) }
         }
         scheduleNext()
         invalidate()
@@ -167,16 +186,24 @@ class ReversiView(context: Context) : View(context) {
         }
 
         drawStones(canvas, current)
+        // 裏返っている最中はパスや結果を重ねない。石の動きが隠れてしまうため
+        val animating = isAnimating()
         when (current.state) {
             Game.State.IN_PROGRESS -> {
-                if (current.turn == playerDisc) drawHints(canvas, current)
+                if (current.turn == playerDisc && !animating) drawHints(canvas, current)
                 drawStatus(canvas, current)
             }
             Game.State.PASS -> {
                 drawStatus(canvas, current)
-                drawPass(canvas)
+                if (!animating) drawPass(canvas)
             }
-            Game.State.FINISHED -> drawResult(canvas, current)
+            Game.State.FINISHED -> if (!animating) drawResult(canvas, current)
+        }
+
+        if (animating) {
+            postInvalidateOnAnimation()
+        } else if (animationEnd > 0L) {
+            clearAnimation()
         }
     }
 
@@ -199,7 +226,7 @@ class ReversiView(context: Context) : View(context) {
                 if (current.turn != playerDisc) return true
                 val index = indexAt(event.x, event.y)
                 if (index in current.legalMoves) {
-                    current.play(index)
+                    playWithAnimation(current, index)
                     scheduleNext()
                     invalidate()
                 }
@@ -244,6 +271,7 @@ class ReversiView(context: Context) : View(context) {
             null
         }
 
+        clearAnimation()
         super.onRestoreInstanceState(
             BundleCompat.getParcelable(state, KEY_SUPER, Parcelable::class.java),
         )
@@ -257,12 +285,56 @@ class ReversiView(context: Context) : View(context) {
     private fun startGame(disc: Disc) {
         playerDisc = disc
         game = Game()
+        clearAnimation()
         scheduleNext()
         invalidate()
     }
 
+    /** 着手し、裏返る石のアニメーションを仕込む。 */
+    private fun playWithAnimation(game: Game, index: Int) {
+        val before = game.board
+        game.play(index)
+        startFlipAnimation(before, game.board, index)
+    }
+
+    private fun startFlipAnimation(before: Board, after: Board, placed: Int) {
+        clearAnimation()
+        if (animationScale <= 0f) return
+
+        val flipMillis = FLIP_MILLIS * animationScale
+        val stagger = STAGGER_MILLIS * animationScale
+        var lastDelay = 0f
+        for (index in Board.INDICES) {
+            val old = before.discAt(index) ?: continue
+            if (after.discAt(index) == old) continue
+            // 置いたマスから遠い石ほど遅れて返る。波が広がるように見せるため
+            val distance = max(
+                abs(Board.colOf(index) - Board.colOf(placed)),
+                abs(Board.rowOf(index) - Board.rowOf(placed)),
+            )
+            val delay = (distance - 1).coerceAtLeast(0) * stagger
+            flipDelay[index] = delay.toInt()
+            lastDelay = max(lastDelay, delay)
+        }
+
+        placedIndex = placed
+        animationStart = AnimationUtils.currentAnimationTimeMillis()
+        animationEnd = animationStart + (lastDelay + flipMillis).toLong()
+    }
+
+    private fun clearAnimation() {
+        flipDelay.fill(NO_DELAY)
+        placedIndex = NO_INDEX
+        animationStart = 0L
+        animationEnd = 0L
+    }
+
+    private fun isAnimating(): Boolean =
+        animationEnd > 0L && AnimationUtils.currentAnimationTimeMillis() < animationEnd
+
     private fun backToTitle() {
         cancelPending()
+        clearAnimation()
         game = null
         invalidate()
     }
@@ -308,14 +380,45 @@ class ReversiView(context: Context) : View(context) {
 
     private fun drawStones(canvas: Canvas, game: Game) {
         val radius = cell * 0.4f
+        val now = AnimationUtils.currentAnimationTimeMillis()
+        val flipMillis = FLIP_MILLIS * animationScale
+        val placeMillis = PLACE_MILLIS * animationScale
+
         for (index in Board.INDICES) {
             val disc = game.board.discAt(index) ?: continue
             val x = centerX(index)
             val y = centerY(index)
-            canvas.drawCircle(x, y, radius, if (disc == Disc.BLACK) blackPaint else whitePaint)
-            canvas.drawCircle(x, y, radius, discEdgePaint)
+            val delay = flipDelay[index]
+
+            when {
+                // 裏返り中：横幅を縮めて 0 を通り、半分を過ぎたら色が変わる
+                delay != NO_DELAY && animationEnd > 0L -> {
+                    val progress = progress(now - animationStart - delay, flipMillis)
+                    val shown = if (progress < 0.5f) disc.opposite else disc
+                    val halfWidth = max(radius * abs(cos(Math.PI * progress)).toFloat(), radius * 0.03f)
+                    drawStone(canvas, x, y, halfWidth, radius, shown)
+                }
+                // 置いた石：小さく現れる
+                index == placedIndex && animationEnd > 0L -> {
+                    val progress = progress(now - animationStart, placeMillis)
+                    val eased = progress * progress * (3f - 2f * progress)
+                    val size = radius * (0.3f + 0.7f * eased)
+                    drawStone(canvas, x, y, size, size, disc)
+                }
+                else -> drawStone(canvas, x, y, radius, radius, disc)
+            }
         }
     }
+
+    private fun drawStone(canvas: Canvas, x: Float, y: Float, halfWidth: Float, halfHeight: Float, disc: Disc) {
+        val paint = if (disc == Disc.BLACK) blackPaint else whitePaint
+        canvas.drawOval(x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight, paint)
+        canvas.drawOval(x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight, discEdgePaint)
+    }
+
+    /** 経過時間を 0..1 に。まだ始まっていなければ 0、終わっていれば 1。 */
+    private fun progress(elapsed: Long, duration: Float): Float =
+        if (duration <= 0f) 1f else (elapsed / duration).coerceIn(0f, 1f)
 
     private fun drawHints(canvas: Canvas, game: Game) {
         for (index in game.legalMoves) {
@@ -467,7 +570,17 @@ class ReversiView(context: Context) : View(context) {
 
     private companion object {
         const val NO_INDEX = -1
+        const val NO_DELAY = -1
         const val PASS_DISPLAY_MILLIS = 1200L
+
+        /** 石 1 枚が裏返りきるまでの時間。 */
+        const val FLIP_MILLIS = 240f
+
+        /** 置いたマスから 1 マス離れるごとに遅らせる時間。 */
+        const val STAGGER_MILLIS = 30f
+
+        /** 置いた石が現れるまでの時間。 */
+        const val PLACE_MILLIS = 160f
 
         /** CPU が考えているように見せる待ち時間。探索自体は数十ミリ秒で終わる。 */
         const val THINKING_MILLIS = 600L
