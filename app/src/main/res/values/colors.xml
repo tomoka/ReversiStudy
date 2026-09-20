@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <color name="game_background">#FF102A17</color>
+    <color name="board_green">#FF1B7A3D</color>
+    <color name="board_line">#66000000</color>
+    <!-- 石。光は左上から当たる前提で、ハイライト側と陰側を持たせる -->
+    <color name="disc_black">#FF111111</color>
+    <color name="disc_black_lit">#FF4E4E4E</color>
+    <color name="disc_black_shade">#FF000000</color>
+    <color name="disc_black_side">#FF2B2B2B</color>
+    <color name="disc_white">#FFF5F5F5</color>
+    <color name="disc_white_lit">#FFFFFFFF</color>
+    <color name="disc_white_shade">#FFBFBFBF</color>
+    <color name="disc_white_side">#FFD8D8D8</color>
+
+    <color name="stone_shadow">#59000000</color>
+    <color name="board_bevel">#26FFFFFF</color>
+    <color name="board_vignette">#3D000000</color>
+    <color name="transparent">#00000000</color>
+    <color name="hint">#99FFEB3B</color>
+    <color name="scrim">#B3000000</color>
+    <color name="overlay">#E6102A17</color>
+    <color name="button_fill">#FF1F3D2B</color>
+    <color name="button_stroke">#FFB0BEC5</color>
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#B3FFFFFF</color>
+
+    <color name="ic_launcher_background">#FF1B5E20</color>
+
+</resources>
