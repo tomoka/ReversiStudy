@@ -10,6 +10,8 @@
     <string name="turn_black">Black to move</string>
     <string name="turn_white">White to move</string>
     <string name="score">● %1$d   ○ %2$d</string>
+    <string name="your_side_black">You are Black</string>
+    <string name="your_side_white">You are White</string>
 
     <string name="pass">Pass</string>
 

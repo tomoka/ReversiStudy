@@ -9,36 +9,36 @@ import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import androidx.core.content.ContextCompat
+import mobi.tomo.reversi.game.Board
+import mobi.tomo.reversi.game.Disc
+import mobi.tomo.reversi.game.Game
 import kotlin.math.max
 import kotlin.math.min
 
 /**
  * 盤面の描画とタッチ入力を担当する View。
  *
- * 盤は画像ではなく Canvas で描き、マスの大きさは View の実寸から毎回算出する。
- * 描画とタッチ判定が同じ [cell] / [boardLeft] / [boardTop] を見るため、
- * 画面の密度やサイズが変わってもズレない。
+ * ルールと進行は [Game] / [Board] が持ち、この View は「今の局面を描く」ことと
+ * 「タップをマスに変換して [Game] に渡す」ことだけを行う。
  *
- * ゲーム進行のロジックはまだこの View の中にある。盤面モデルと CPU 思考への
- * 分離はフェーズ3以降で行う。
+ * マスの大きさは View の実寸から算出するため、画面の密度やサイズに依存しない。
  */
 class ReversiView(context: Context) : View(context) {
 
-    private val board = IntArray(100)
-    private val placeMap = IntArray(100)
+    /** 対局中の状態。null はタイトル画面。 */
+    private var game: Game? = null
 
-    private var page = TITLE
-    private var turn = PLAYER
-    private var playerColor = BLACK
+    /** プレイヤーが選んだ色。CPU 対戦を入れるときに使う。 */
+    private var playerDisc = Disc.BLACK
 
     /** 盤の一辺（px）。0 のうちはまだ採寸できていない。 */
     private var boardSide = 0f
     private var cell = 0f
     private var boardLeft = 0f
     private var boardTop = 0f
-
     private var statusBaseline = 0f
     private var scoreBaseline = 0f
+    private var footerBaseline = 0f
 
     private val blackButton = RectF()
     private val whiteButton = RectF()
@@ -73,14 +73,8 @@ class ReversiView(context: Context) : View(context) {
 
     /** パス表示を一定時間見せてから手番を戻す。 */
     private val passRunnable = Runnable {
-        turn = opponent(turn)
-        makePlaceMap(turn)
-        page = PLAY
+        game?.acknowledgePass()
         invalidate()
-    }
-
-    init {
-        resetBoard()
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -97,13 +91,14 @@ class ReversiView(context: Context) : View(context) {
             0f,
             min(availableWidth - margin * 2f, availableHeight - header - footer - margin * 2f),
         )
-        cell = boardSide / 8f
+        cell = boardSide / Board.SIZE
         boardLeft = paddingLeft + (availableWidth - boardSide) / 2f
         boardTop = paddingTop + header +
             max(0f, (availableHeight - header - footer - boardSide) / 2f)
 
         statusBaseline = boardTop - header * 0.45f
         scoreBaseline = boardTop - header * 0.14f
+        footerBaseline = boardTop + boardSide + footer * 0.7f
 
         linePaint.strokeWidth = max(dp(1f), cell * 0.02f)
         discEdgePaint.strokeWidth = max(dp(0.5f), cell * 0.02f)
@@ -140,22 +135,23 @@ class ReversiView(context: Context) : View(context) {
         if (boardSide <= 0f) return
 
         drawBoard(canvas)
-        when (page) {
-            TITLE -> drawTitle(canvas)
-            PLAY -> {
-                drawStones(canvas)
-                drawHints(canvas)
-                drawStatus(canvas)
+        val current = game
+        if (current == null) {
+            drawTitle(canvas)
+            return
+        }
+
+        drawStones(canvas, current)
+        when (current.state) {
+            Game.State.IN_PROGRESS -> {
+                drawHints(canvas, current)
+                drawStatus(canvas, current)
             }
-            PASS -> {
-                drawStones(canvas)
-                drawStatus(canvas)
+            Game.State.PASS -> {
+                drawStatus(canvas, current)
                 drawPass(canvas)
             }
-            RESULT -> {
-                drawStones(canvas)
-                drawResult(canvas)
-            }
+            Game.State.FINISHED -> drawResult(canvas, current)
         }
     }
 
@@ -163,20 +159,29 @@ class ReversiView(context: Context) : View(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.action != MotionEvent.ACTION_DOWN) return super.onTouchEvent(event)
 
-        when (page) {
-            TITLE -> when {
-                blackButton.contains(event.x, event.y) -> startGame(BLACK)
-                whiteButton.contains(event.x, event.y) -> startGame(WHITE)
+        val current = game
+        if (current == null) {
+            when {
+                blackButton.contains(event.x, event.y) -> startGame(Disc.BLACK)
+                whiteButton.contains(event.x, event.y) -> startGame(Disc.WHITE)
             }
-            PLAY -> {
+            return true
+        }
+
+        when (current.state) {
+            Game.State.IN_PROGRESS -> {
                 val index = indexAt(event.x, event.y)
-                if (index != NO_INDEX && placeMap[index] > 0) {
-                    reverse(turn, index)
-                    advanceTurn()
+                if (index in current.legalMoves) {
+                    current.play(index)
+                    if (current.state == Game.State.PASS) {
+                        removeCallbacks(passRunnable)
+                        postDelayed(passRunnable, PASS_DISPLAY_MILLIS)
+                    }
+                    invalidate()
                 }
             }
-            RESULT -> backToTitle()
-            PASS -> Unit
+            Game.State.PASS -> Unit
+            Game.State.FINISHED -> backToTitle()
         }
         return true
     }
@@ -186,75 +191,24 @@ class ReversiView(context: Context) : View(context) {
         super.onDetachedFromWindow()
     }
 
-    // ------------------------------------------------------------------ 進行
-
-    private fun startGame(color: Int) {
-        resetBoard()
-        playerColor = color
-        if (color == BLACK) {
-            board[44] = COM
-            board[45] = PLAYER
-            board[54] = PLAYER
-            board[55] = COM
-            turn = PLAYER
-        } else {
-            board[44] = PLAYER
-            board[45] = COM
-            board[54] = COM
-            board[55] = PLAYER
-            turn = COM
-        }
-        page = PLAY
-        makePlaceMap(turn)
-        invalidate()
-    }
-
-    /** 手番を交代し、パスと終局を判定する。 */
-    private fun advanceTurn() {
-        turn = opponent(turn)
-        val currentCannotMove = makePlaceMap(turn)
-        val opponentCannotMove = makePlaceMap(opponent(turn))
-        when {
-            currentCannotMove && opponentCannotMove -> page = RESULT
-            currentCannotMove -> {
-                makePlaceMap(turn)
-                page = PASS
-                removeCallbacks(passRunnable)
-                postDelayed(passRunnable, PASS_DISPLAY_MILLIS)
-            }
-            else -> {
-                makePlaceMap(turn)
-                page = PLAY
-            }
-        }
+    private fun startGame(disc: Disc) {
+        removeCallbacks(passRunnable)
+        playerDisc = disc
+        game = Game()
         invalidate()
     }
 
     private fun backToTitle() {
         removeCallbacks(passRunnable)
-        resetBoard()
-        page = TITLE
+        game = null
         invalidate()
-    }
-
-    private fun resetBoard() {
-        board.fill(EMPTY)
-        placeMap.fill(0)
-        for (i in 0..9) {
-            board[i] = WALL
-            board[i + 90] = WALL
-        }
-        for (i in 1..8) {
-            board[i * 10] = WALL
-            board[i * 10 + 9] = WALL
-        }
     }
 
     // ------------------------------------------------------------------ 描画
 
     private fun drawBoard(canvas: Canvas) {
         canvas.drawRect(boardLeft, boardTop, boardLeft + boardSide, boardTop + boardSide, boardPaint)
-        for (i in 0..8) {
+        for (i in 0..Board.SIZE) {
             val x = boardLeft + cell * i
             canvas.drawLine(x, boardTop, x, boardTop + boardSide, linePaint)
             val y = boardTop + cell * i
@@ -272,37 +226,36 @@ class ReversiView(context: Context) : View(context) {
         }
     }
 
-    private fun drawStones(canvas: Canvas) {
+    private fun drawStones(canvas: Canvas, game: Game) {
         val radius = cell * 0.4f
-        for (index in 11..88) {
-            val seat = board[index]
-            if (seat != PLAYER && seat != COM) continue
-            val paint = if (colorOf(seat) == BLACK) blackPaint else whitePaint
+        for (index in Board.INDICES) {
+            val disc = game.board.discAt(index) ?: continue
             val x = centerX(index)
             val y = centerY(index)
-            canvas.drawCircle(x, y, radius, paint)
+            canvas.drawCircle(x, y, radius, if (disc == Disc.BLACK) blackPaint else whitePaint)
             canvas.drawCircle(x, y, radius, discEdgePaint)
         }
     }
 
-    private fun drawHints(canvas: Canvas) {
-        for (index in 11..88) {
-            if (placeMap[index] > 0) {
-                canvas.drawCircle(centerX(index), centerY(index), cell * 0.13f, hintPaint)
-            }
+    private fun drawHints(canvas: Canvas, game: Game) {
+        for (index in game.legalMoves) {
+            canvas.drawCircle(centerX(index), centerY(index), cell * 0.13f, hintPaint)
         }
     }
 
-    private fun drawStatus(canvas: Canvas) {
+    private fun drawStatus(canvas: Canvas, game: Game) {
         val centerX = boardLeft + boardSide / 2f
-        val turnText = if (turnColor() == BLACK) R.string.turn_black else R.string.turn_white
+        val turnText = if (game.turn == Disc.BLACK) R.string.turn_black else R.string.turn_white
         canvas.drawText(context.getString(turnText), centerX, statusBaseline, bodyPaint)
         canvas.drawText(
-            context.getString(R.string.score, count(BLACK), count(WHITE)),
+            context.getString(R.string.score, game.count(Disc.BLACK), game.count(Disc.WHITE)),
             centerX,
             scoreBaseline,
             labelPaint,
         )
+        val sideText =
+            if (playerDisc == Disc.BLACK) R.string.your_side_black else R.string.your_side_white
+        canvas.drawText(context.getString(sideText), centerX, footerBaseline, labelPaint)
     }
 
     private fun drawTitle(canvas: Canvas) {
@@ -320,11 +273,11 @@ class ReversiView(context: Context) : View(context) {
             boardTop + boardSide * 0.44f,
             bodyPaint,
         )
-        drawChoiceButton(canvas, blackButton, BLACK, context.getString(R.string.choose_black))
-        drawChoiceButton(canvas, whiteButton, WHITE, context.getString(R.string.choose_white))
+        drawChoiceButton(canvas, blackButton, Disc.BLACK, context.getString(R.string.choose_black))
+        drawChoiceButton(canvas, whiteButton, Disc.WHITE, context.getString(R.string.choose_white))
     }
 
-    private fun drawChoiceButton(canvas: Canvas, rect: RectF, color: Int, label: String) {
+    private fun drawChoiceButton(canvas: Canvas, rect: RectF, disc: Disc, label: String) {
         val corner = rect.height() / 4f
         canvas.drawRoundRect(rect, corner, corner, buttonPaint)
         canvas.drawRoundRect(rect, corner, corner, buttonStrokePaint)
@@ -334,7 +287,7 @@ class ReversiView(context: Context) : View(context) {
             discX,
             rect.centerY(),
             rect.height() * 0.28f,
-            if (color == BLACK) blackPaint else whitePaint,
+            if (disc == Disc.BLACK) blackPaint else whitePaint,
         )
         canvas.drawText(
             label,
@@ -355,11 +308,9 @@ class ReversiView(context: Context) : View(context) {
         )
     }
 
-    private fun drawResult(canvas: Canvas) {
+    private fun drawResult(canvas: Canvas, game: Game) {
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), scrimPaint)
         val centerX = boardLeft + boardSide / 2f
-        val black = count(BLACK)
-        val white = count(WHITE)
         canvas.drawText(
             context.getString(R.string.result),
             centerX,
@@ -367,21 +318,21 @@ class ReversiView(context: Context) : View(context) {
             titlePaint,
         )
         canvas.drawText(
-            context.getString(R.string.black_count, black),
+            context.getString(R.string.black_count, game.count(Disc.BLACK)),
             centerX,
             boardTop + boardSide * 0.42f,
             bodyPaint,
         )
         canvas.drawText(
-            context.getString(R.string.white_count, white),
+            context.getString(R.string.white_count, game.count(Disc.WHITE)),
             centerX,
             boardTop + boardSide * 0.52f,
             bodyPaint,
         )
-        val winner = when {
-            black > white -> R.string.winner_black
-            white > black -> R.string.winner_white
-            else -> R.string.draw
+        val winner = when (game.winner) {
+            Disc.BLACK -> R.string.winner_black
+            Disc.WHITE -> R.string.winner_white
+            null -> R.string.draw
         }
         canvas.drawText(
             context.getString(winner),
@@ -399,79 +350,18 @@ class ReversiView(context: Context) : View(context) {
 
     // ------------------------------------------------------------ 座標の変換
 
-    private fun centerX(index: Int) = boardLeft + cell * (index % 10 - 0.5f)
+    private fun centerX(index: Int) = boardLeft + cell * (Board.colOf(index) - 0.5f)
 
-    private fun centerY(index: Int) = boardTop + cell * (index / 10 - 0.5f)
+    private fun centerY(index: Int) = boardTop + cell * (Board.rowOf(index) - 0.5f)
 
     /** タッチ座標を盤上のマス番号へ。盤の外なら [NO_INDEX]。 */
     private fun indexAt(x: Float, y: Float): Int {
         if (cell <= 0f || x < boardLeft || y < boardTop) return NO_INDEX
         val col = ((x - boardLeft) / cell).toInt() + 1
         val row = ((y - boardTop) / cell).toInt() + 1
-        if (col !in 1..8 || row !in 1..8) return NO_INDEX
-        return row * 10 + col
+        if (col !in 1..Board.SIZE || row !in 1..Board.SIZE) return NO_INDEX
+        return Board.index(col, row)
     }
-
-    // -------------------------------------------------------------- ルール
-
-    /** 置いて裏返す。 */
-    private fun reverse(myCoin: Int, p: Int) {
-        val yourCoin = opponent(myCoin)
-
-        board[p] = myCoin
-        for (i in 0..7) {
-            if (board[p + MOVE[i]] == yourCoin) {
-                for (j in 2..7) {
-                    if (board[p + MOVE[i] * j] == myCoin) {
-                        for (k in 1 until j) {
-                            board[p + MOVE[i] * k] = myCoin
-                        }
-                        break
-                    } else if (board[p + MOVE[i] * j] != yourCoin) {
-                        break
-                    }
-                }
-            }
-        }
-    }
-
-    /** どこに置けるか？ 置ける場所が一つも無い（＝パス）ときに true を返す。 */
-    private fun makePlaceMap(myCoin: Int): Boolean {
-        val yourCoin = opponent(myCoin)
-        var pass = true
-
-        for (p in 0..99) {
-            placeMap[p] = 0
-            if (p > 0 && board[p] == EMPTY) {
-                for (i in 0..7) {
-                    if (board[p + MOVE[i]] == yourCoin) {
-                        for (j in 2..7) {
-                            if (board[p + MOVE[i] * j] == myCoin) {
-                                placeMap[p] += j - 1
-                                pass = false
-                                break
-                            } else if (board[p + MOVE[i] * j] != yourCoin) {
-                                break
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return pass
-    }
-
-    /** 石を数える。 */
-    private fun count(color: Int): Int {
-        val seat = if (playerColor == color) PLAYER else COM
-        return board.count { it == seat }
-    }
-
-    private fun opponent(seat: Int) = if (seat == PLAYER) COM else PLAYER
-
-    private fun colorOf(seat: Int) = if (seat == PLAYER) playerColor else 1 - playerColor
-
-    private fun turnColor() = colorOf(turn)
 
     // -------------------------------------------------------------- 小道具
 
@@ -493,22 +383,7 @@ class ReversiView(context: Context) : View(context) {
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value, resources.displayMetrics)
 
     private companion object {
-        const val TITLE = 0
-        const val PLAY = 1
-        const val PASS = 2
-        const val RESULT = 3
-
-        const val EMPTY = 0
-        const val PLAYER = 1
-        const val COM = 2
-        const val WALL = -1
-
-        const val BLACK = 0
-        const val WHITE = 1
-
         const val NO_INDEX = -1
         const val PASS_DISPLAY_MILLIS = 1200L
-
-        val MOVE = intArrayOf(-11, -10, -9, -1, 1, 9, 10, 11)
     }
 }
