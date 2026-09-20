@@ -1,7 +1,14 @@
 # ReversiStudy
 
 Android 向けのリバーシ。2013 年に Eclipse ADT で作ったものを、Gradle + Kotlin に作り直した。
-CPU 対戦ができる。
+CPU 対戦ができる。広告なし、通信なし。
+
+- 配布ページ: https://tomoka.github.io/ReversiStudy/
+- ダウンロード: [Releases](https://github.com/tomoka/ReversiStudy/releases)
+
+なお、このリポジトリに置いていた 2013 年のコードは、公開用に一部の機能を外した
+状態のもので、当時リリースした版そのものではない。CPU 対戦が無く、タイトル画面も
+描画されない状態だった。
 
 ## ビルド
 
@@ -13,6 +20,51 @@ Android Studio で開くか、コマンドラインから:
 
 - JDK 17 以上
 - compileSdk / targetSdk 36、minSdk 24
+- applicationId は `io.github.tomoka.reversi`。旧 ID（`mobi.tomo.reversi`）は
+  Google Play 側で予約されたままのため使えない
+
+## リリースビルド
+
+署名鍵を作る（初回のみ）。
+
+```
+keytool -genkeypair -v \
+  -keystore reversi-release.jks \
+  -alias reversi \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
+
+**鍵とパスワードはリポジトリに入れない。** 鍵の場所とパスワードは、
+リポジトリ直下の `keystore.properties`（`.gitignore` 済み）に書く。
+
+```
+RELEASE_STORE_FILE=/path/to/reversi-release.jks
+RELEASE_STORE_PASSWORD=...
+RELEASE_KEY_ALIAS=reversi
+RELEASE_KEY_PASSWORD=...
+```
+
+同じ名前の環境変数でも読む。設定が無ければ署名されないだけで、デバッグ
+ビルドには影響しない。
+
+```
+./gradlew assembleRelease
+```
+
+APK は `app/build/outputs/apk/release/` にできる。
+
+**鍵は無くさないこと。** 同じ鍵で署名しないと、既存の利用者はアプリを
+更新できない。
+
+## 配布
+
+Google Play では配信していない。APK を [Releases](https://github.com/tomoka/ReversiStudy/releases)
+に置いて配る。
+
+配布ページ（プライバシーポリシー・利用規約を含む）は `docs/` にあり、
+GitHub Pages で公開している。有効化はリポジトリの
+Settings → Pages → Source を「Deploy from a branch」、Branch を
+`master` / `/docs` に設定する。
 
 ## 改修フェーズ
 
