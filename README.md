@@ -33,6 +33,7 @@ Android Studio で開くか、コマンドラインから:
 - **できあがった APK は Actions の実行ページから成果物としてダウンロードできる**
   （Actions → 該当の実行 → Artifacts → `reversi-debug-apk`）
 - 手元で試すだけなら `adb` があればよい。これは JVM を使わないので直接取得できる
+- **署名は CI ではやらない。** 鍵を預けないため（→ [署名を CI でやらない理由](#署名を-ci-でやらない理由)）
 
 ```
 cd ~/Android/sdk
@@ -52,7 +53,7 @@ keytool -genkeypair -v \
   -keyalg RSA -keysize 2048 -validity 10000
 ```
 
-**鍵とパスワードはリポジトリに入れない。** 鍵の場所とパスワードは、
+**鍵とパスワードはこの端末から出さない。** 鍵の場所とパスワードは、
 リポジトリ直下の `keystore.properties`（`.gitignore` 済み）に書く。
 
 ```
@@ -74,23 +75,40 @@ APK は `app/build/outputs/apk/release/` にできる。
 **鍵は無くさないこと。** 同じ鍵で署名しないと、既存の利用者はアプリを
 更新できない。
 
-### タグを打って自動でリリースする
+### リリースの手順
 
-`v` で始まるタグを push すると、GitHub Actions が署名済み APK をビルドして
-Releases に添付する。あらかじめリポジトリの Settings → Secrets and variables →
-Actions に次を登録しておく。
-
-| Secret | 中身 |
-| --- | --- |
-| `KEYSTORE_BASE64` | `base64 -i reversi-release.jks \| pbcopy` の出力 |
-| `RELEASE_STORE_PASSWORD` | キーストアのパスワード |
-| `RELEASE_KEY_ALIAS` | 鍵のエイリアス（例: `reversi`） |
-| `RELEASE_KEY_PASSWORD` | 鍵のパスワード |
+署名は手元でのみ行う。**鍵は CI に渡さない。**
 
 ```
-git tag v2.0.0
-git push origin v2.0.0
+./gradlew clean test assembleRelease
 ```
+
+できた APK を GitHub の Releases に添付する。ブラウザからドラッグ＆ドロップ
+するか、手元に `gh` があれば次でもよい。
+
+```
+gh release create v2.0.0 \
+  app/build/outputs/apk/release/*.apk \
+  --title v2.0.0 --generate-notes
+```
+
+### 署名を CI でやらない理由
+
+タグを push すると GitHub Actions が署名済み APK を作る、という構成も
+可能で、実際に一度そうしていた。ただしそれには鍵を base64 にして Secrets
+へ預ける必要がある。
+
+署名鍵は、このプロジェクトで唯一**漏れたら取り返しがつかないもの**である。
+漏れれば第三者が「正規のアップデート」を名乗る APK を配れてしまうし、
+鍵を変えれば既存の利用者はアプリを更新できなくなる。パスワードのように
+後から替えて済む類のものではない。
+
+一方で CI に預ける見返りは「タグを push するだけで済む」という手間の
+削減だけで、リリースは年に数回あるかどうかという頻度である。
+割に合わないと判断して、署名はローカルに残した。
+
+テストとデバッグ APK のビルドは引き続き CI で回している（`build.yml`）。
+鍵を必要としない作業なので、そちらは預けて困らない。
 
 ## 配布
 
