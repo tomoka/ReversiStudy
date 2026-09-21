@@ -77,7 +77,7 @@ class ComputerPlayerTest {
             assertEquals("打てる手は隅と斜め隣の 2 箇所のはず", 2, moves.size)
             assertTrue("隅が候補に無い", moves.contains(corner))
 
-            val shallow = ComputerPlayer(depth = 1, random = Random(1))
+            val shallow = ComputerPlayer.custom(depth = 1, random = Random(1))
             assertEquals("隅を選ばなかった", corner, shallow.chooseMove(board, Disc.BLACK))
         }
     }
@@ -99,7 +99,7 @@ class ComputerPlayerTest {
         repeat(30) {
             // 空きが 8 マスになるまでランダムに進める
             val game = Game()
-            while (!game.isFinished && emptyCount(game.board) > ComputerPlayer.MEDIUM_ENDGAME_EMPTIES) {
+            while (!game.isFinished && emptyCount(game.board) > Difficulty.NORMAL.endgameEmpties) {
                 when (game.state) {
                     Game.State.PASS -> game.acknowledgePass()
                     Game.State.FINISHED -> Unit

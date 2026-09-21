@@ -8,20 +8,31 @@ import kotlin.random.Random
  * 評価はマスの重み付けと着手可能数（打てる手の多さ）の組み合わせ。
  * 残りマスが少なくなったら最後まで読み切って石差を最大化する。
  *
- * 強さは [depth] と [endgameEmpties] で決まる。既定は「中くらい」で、
- * 素人には勝ち越すが、定石を知っている相手には負ける程度を狙っている。
+ * 強さは [Difficulty] で決まる。深い段階は 1 手に 1 秒以上かかることがあるため、
+ * 呼び出し側は画面を止めないよう別スレッドで動かすこと。
  */
-class ComputerPlayer(
-    private val depth: Int = MEDIUM_DEPTH,
-    private val endgameEmpties: Int = MEDIUM_ENDGAME_EMPTIES,
-    private val random: Random = Random.Default,
+class ComputerPlayer private constructor(
+    private val depth: Int,
+    private val endgameEmpties: Int,
+    private val randomness: Float,
+    private val random: Random,
 ) {
+
+    constructor(
+        difficulty: Difficulty = Difficulty.DEFAULT,
+        random: Random = Random.Default,
+    ) : this(difficulty.depth, difficulty.endgameEmpties, difficulty.randomness, random)
 
     /** [disc] の手番として指す場所を選ぶ。打てる場所が無ければ null。 */
     fun chooseMove(board: Board, disc: Disc): Int? {
         val moves = board.legalMoves(disc)
         if (moves.isEmpty()) return null
         if (moves.size == 1) return moves.first()
+
+        // 弱い段階では、ときどきわざと最善から外す
+        if (randomness > 0f && random.nextFloat() < randomness) {
+            return moves[random.nextInt(moves.size)]
+        }
 
         val empties = Board.INDICES.count { board.isEmpty(it) }
         val readToEnd = empties <= endgameEmpties
@@ -99,11 +110,13 @@ class ComputerPlayer(
         (Board.rowOf(index) - 1) * Board.SIZE + (Board.colOf(index) - 1)
 
     companion object {
-        /** 中くらいの強さ。読みの深さ（手数）。 */
-        const val MEDIUM_DEPTH = 4
-
-        /** 空きマスがこの数以下になったら最後まで読み切る。 */
-        const val MEDIUM_ENDGAME_EMPTIES = 8
+        /** 段階に縛られない設定で作る。強さの比較やテスト用。 */
+        fun custom(
+            depth: Int,
+            endgameEmpties: Int = Difficulty.NORMAL.endgameEmpties,
+            randomness: Float = 0f,
+            random: Random = Random.Default,
+        ): ComputerPlayer = ComputerPlayer(depth, endgameEmpties, randomness, random)
 
         private const val INFINITY = 10_000_000
         private const val TERMINAL_WEIGHT = 10_000
