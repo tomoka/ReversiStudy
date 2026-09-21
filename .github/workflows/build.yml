@@ -1,0 +1,50 @@
+name: build
+
+# 手元の環境に Android SDK が無くてもビルドと検証ができるようにするためのもの。
+# GitHub のランナーには SDK が入っていて、ネットワーク制限も無い。
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 21 を用意する
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: SDK のパッケージを入れる
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: ユニットテスト
+        run: ./gradlew --no-daemon test
+
+      - name: デバッグ APK をビルド
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: APK を成果物として置く
+        uses: actions/upload-artifact@v4
+        with:
+          name: reversi-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: テスト結果を成果物として置く
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: app/build/reports/tests/
+          if-no-files-found: ignore

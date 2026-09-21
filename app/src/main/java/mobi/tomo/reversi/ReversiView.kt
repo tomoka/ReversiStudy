@@ -303,7 +303,7 @@ class ReversiView(context: Context) : View(context) {
         if (animating) {
             postInvalidateOnAnimation()
         } else if (animationEnd > 0L) {
-            clearAnimation()
+            resetFlipAnimation()
         }
     }
 
@@ -371,7 +371,7 @@ class ReversiView(context: Context) : View(context) {
             null
         }
 
-        clearAnimation()
+        resetFlipAnimation()
         super.onRestoreInstanceState(
             BundleCompat.getParcelable(state, KEY_SUPER, Parcelable::class.java),
         )
@@ -385,7 +385,7 @@ class ReversiView(context: Context) : View(context) {
     private fun startGame(disc: Disc) {
         playerDisc = disc
         game = Game()
-        clearAnimation()
+        resetFlipAnimation()
         scheduleNext()
         invalidate()
     }
@@ -398,7 +398,7 @@ class ReversiView(context: Context) : View(context) {
     }
 
     private fun startFlipAnimation(before: Board, after: Board, placed: Int) {
-        clearAnimation()
+        resetFlipAnimation()
         if (animationScale <= 0f) return
 
         val flipMillis = FLIP_MILLIS * animationScale
@@ -422,7 +422,7 @@ class ReversiView(context: Context) : View(context) {
         animationEnd = animationStart + (lastDelay + flipMillis).toLong()
     }
 
-    private fun clearAnimation() {
+    private fun resetFlipAnimation() {
         flipDelay.fill(NO_DELAY)
         placedIndex = NO_INDEX
         animationStart = 0L
@@ -434,7 +434,7 @@ class ReversiView(context: Context) : View(context) {
 
     private fun backToTitle() {
         cancelPending()
-        clearAnimation()
+        resetFlipAnimation()
         game = null
         invalidate()
     }

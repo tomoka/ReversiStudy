@@ -1,5 +1,7 @@
 # ReversiStudy
 
+[![build](https://github.com/tomoka/ReversiStudy/actions/workflows/build.yml/badge.svg)](https://github.com/tomoka/ReversiStudy/actions/workflows/build.yml)
+
 Android 向けのリバーシ。2013 年に Eclipse ADT で作ったものを、Gradle + Kotlin に作り直した。
 CPU 対戦ができる。広告なし、通信なし。
 
@@ -22,6 +24,22 @@ Android Studio で開くか、コマンドラインから:
 - compileSdk / targetSdk 36、minSdk 24
 - applicationId は `io.github.tomoka.reversi`。旧 ID（`mobi.tomo.reversi`）は
   Google Play 側で予約されたままのため使えない
+
+## CI
+
+手元に Android SDK を用意しなくても、GitHub Actions でビルドと検証ができる。
+
+- `master` への push と Pull Request のたびに、ユニットテストとデバッグビルドが走る
+- **できあがった APK は Actions の実行ページから成果物としてダウンロードできる**
+  （Actions → 該当の実行 → Artifacts → `reversi-debug-apk`）
+- 手元で試すだけなら `adb` があればよい。これは JVM を使わないので直接取得できる
+
+```
+cd ~/Android/sdk
+curl -O https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
+unzip -q platform-tools-latest-darwin.zip
+./platform-tools/adb install ~/Downloads/app-debug.apk
+```
 
 ## リリースビルド
 
@@ -55,6 +73,24 @@ APK は `app/build/outputs/apk/release/` にできる。
 
 **鍵は無くさないこと。** 同じ鍵で署名しないと、既存の利用者はアプリを
 更新できない。
+
+### タグを打って自動でリリースする
+
+`v` で始まるタグを push すると、GitHub Actions が署名済み APK をビルドして
+Releases に添付する。あらかじめリポジトリの Settings → Secrets and variables →
+Actions に次を登録しておく。
+
+| Secret | 中身 |
+| --- | --- |
+| `KEYSTORE_BASE64` | `base64 -i reversi-release.jks \| pbcopy` の出力 |
+| `RELEASE_STORE_PASSWORD` | キーストアのパスワード |
+| `RELEASE_KEY_ALIAS` | 鍵のエイリアス（例: `reversi`） |
+| `RELEASE_KEY_PASSWORD` | 鍵のパスワード |
+
+```
+git tag v2.0.0
+git push origin v2.0.0
+```
 
 ## 配布
 
